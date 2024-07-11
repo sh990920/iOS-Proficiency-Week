@@ -1,5 +1,6 @@
 import UIKit
 import SnapKit
+import Alamofire
 
 class ViewController: UIViewController {
 
@@ -11,7 +12,7 @@ class ViewController: UIViewController {
     private let urlQueryItems: [URLQueryItem] = [
         URLQueryItem(name: "lat", value: "37.5"),
         URLQueryItem(name: "lon", value: "126.9"),
-        URLQueryItem(name: "appid", value: "API키 입력"),
+        URLQueryItem(name: "appid", value: "197942db9b55f0787c22b30855dbba29"),
         URLQueryItem(name: "units", value: "metric")
     ]
     
@@ -97,6 +98,13 @@ class ViewController: UIViewController {
         }.resume()
     }
     
+    // Alamofire 를 사용해서 서버 데이터를 불러오는 메서드
+    private func fetchDataByAlamofire<T: Decodable>(url: URL, completion: @escaping (Result<T, AFError>) -> Void) {
+        AF.request(url).responseDecodable(of: T.self) { response in
+            completion(response.result)
+        }
+    }
+    
     // 서버에서 현재 날씨 데이터를 불러오는 메서드
     private func fetchCurrentWeatherData() {
         var urlComponents = URLComponents(string: "https://api.openweathermap.org/data/2.5/weather")
@@ -106,27 +114,49 @@ class ViewController: UIViewController {
             print("잘못된 URL")
             return
         }
-        
-        fetchData(url: url) { [weak self] (result: CurrentWeatherResult?) in
-            guard let self, let result else { return }
-            // UI 작업은 메인 쓰레드에서 작업
-            DispatchQueue.main.async {
-                self.tempLabel.text = "\(Int(result.main.temp))°C"
-                self.tempMinLabel.text = "최소: \(Int(result.main.temp_min))°C"
-                self.tempMaxLabel.text = "최고: \(Int(result.main.temp_max))°C"
-            }
-            guard let imageUrl = URL(string: "https://openweathermap.org/img/wn/\(result.weather[0].icon)@2x.png") else { return }
-    
-            // image 를 로드하는 작업은 백그라운드 쓰레드 작업
-            if let data = try? Data(contentsOf: imageUrl) {
-                if let image = UIImage(data: data) {
-                    // 이미지뷰에 이미지를 그리는 작업은 UI 작업이기 때문에 다시 메인 쓰레드에서 작업.
-                    DispatchQueue.main.async {
-                        self.imageView.image = image
+        fetchDataByAlamofire(url: url) { [weak self] (result: Result<CurrentWeatherResult, AFError>) in
+            guard let self else { return }
+            switch result {
+            case .success(let result):
+                DispatchQueue.main.async {
+                    self.tempLabel.text = "\(Int(result.main.temp))°C"
+                    self.tempMinLabel.text = "최소: \(Int(result.main.tempMin))°C"
+                    self.tempMaxLabel.text = "최고: \(Int(result.main.tempMax))°C"
+                }
+                
+                guard let imageUrl = URL(string: "https://openweathermap.org/img/wn/\(result.weather[0].icon)@2x.png") else { return }
+                
+                AF.request(imageUrl).responseData { response in
+                    if let data = response.data, let image = UIImage(data: data) {
+                        DispatchQueue.main.async {
+                            self.imageView.image = image
+                        }
                     }
                 }
+            case .failure(let error):
+                print("데이터 로드 실패")
             }
         }
+        //        fetchData(url: url) { [weak self] (result: CurrentWeatherResult?) in
+        //            guard let self, let result else { return }
+        //            // UI 작업은 메인 쓰레드에서 작업
+        //            DispatchQueue.main.async {
+        //                self.tempLabel.text = "\(Int(result.main.temp))°C"
+        //                self.tempMinLabel.text = "최소: \(Int(result.main.tempMin))°C"
+        //                self.tempMaxLabel.text = "최고: \(Int(result.main.tempMax))°C"
+        //            }
+        //            guard let imageUrl = URL(string: "https://openweathermap.org/img/wn/\(result.weather[0].icon)@2x.png") else { return }
+        //
+        //            // image 를 로드하는 작업은 백그라운드 쓰레드 작업
+        //            if let data = try? Data(contentsOf: imageUrl) {
+        //                if let image = UIImage(data: data) {
+        //                    // 이미지뷰에 이미지를 그리는 작업은 UI 작업이기 때문에 다시 메인 쓰레드에서 작업.
+        //                    DispatchQueue.main.async {
+        //                        self.imageView.image = image
+        //                    }
+        //                }
+        //            }
+        //        }
     }
 
     // 서버에서 5일 간 날씨 예보 데이터를 불러오는 메서드
@@ -139,20 +169,33 @@ class ViewController: UIViewController {
             return
         }
         
-        fetchData(url: url) { [weak self] (result: ForecastWeatherResult?) in
-            guard let self, let result else { return }
-            
-            // result 콘솔에 찍어보기
-            for forecastWeather in result.list {
-                print("\(forecastWeather.main)\n\(forecastWeather.dtTxt)\n\n")
+        fetchDataByAlamofire(url: url) { [weak self] (result: Result<ForecastWeatherResult, AFError>) in
+            guard let self = self else { return }
+            switch result {
+            case .success(let result):
+                DispatchQueue.main.async {
+                    self.dataSource = result.list
+                    self.tableView.reloadData()
+                }
+            case .failure(let error):
+                print("데이터 로드 실패\(error)")
             }
             
-            // UI 작업은 메인 쓰레드에서
-            DispatchQueue.main.async {
-                self.dataSource = result.list
-                self.tableView.reloadData()
-            }
         }
+//        fetchData(url: url) { [weak self] (result: ForecastWeatherResult?) in
+//            guard let self, let result else { return }
+//            
+//            // result 콘솔에 찍어보기
+//            for forecastWeather in result.list {
+//                print("\(forecastWeather.main)\n\(forecastWeather.dtTxt)\n\n")
+//            }
+//            
+//            // UI 작업은 메인 쓰레드에서
+//            DispatchQueue.main.async {
+//                self.dataSource = result.list
+//                self.tableView.reloadData()
+//            }
+//        }
     }
     
     private func configureUI() {
